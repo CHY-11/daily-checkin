@@ -399,22 +399,48 @@ const API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/content
 const STORAGE_KEY = 'post-checkin-data';
 let cloudSha = null;
 let cloudAvailable = false;
+let syncPending = false;
+
+function b64Encode(str) {
+  // UTF-8 safe base64 encode
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function b64Decode(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
 
 async function loadData() {
-  // 1. Try GitHub raw (cloud) - fast, no auth
+  // 1. Try GitHub API (always fresh, no CDN cache)
   try {
-    const res = await fetch(RAW_URL, { cache: 'no-cache' });
+    const res = await fetch(API_URL, {
+      headers: { Authorization: 'Bearer ' + TOKEN, Accept: 'application/vnd.github.v3+json' }
+    });
     if (res.ok) {
-      checks = await res.json();
+      const j = await res.json();
+      checks = JSON.parse(b64Decode(j.content));
+      cloudSha = j.sha;
       cloudAvailable = true;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(checks));
       return;
     }
-    // 404 = no data yet, start fresh
     if (res.status === 404) { checks = {}; cloudAvailable = true; return; }
-  } catch (e) { /* cloud unavailable */ }
+  } catch (e) { /* fall through */ }
 
-  // 2. Fallback: localStorage
+  // 2. Try raw CDN
+  try {
+    const res = await fetch(RAW_URL, { cache: 'no-cache' });
+    if (res.ok) { checks = await res.json(); localStorage.setItem(STORAGE_KEY, JSON.stringify(checks)); return; }
+    if (res.status === 404) { checks = {}; return; }
+  } catch (e) { /* fall through */ }
+
+  // 3. Fallback: localStorage
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     checks = raw ? JSON.parse(raw) : {};
@@ -423,57 +449,70 @@ async function loadData() {
 }
 
 async function saveData(key, value) {
+  if (syncPending) return; // prevent concurrent writes
+  syncPending = true;
+
   // Update local state
   if (value) { checks[key] = true; } else { delete checks[key]; }
-  // Trim old data
-  const now = new Date();
-  const cutoff = new Date(now);
-  cutoff.setDate(cutoff.getDate() - 90);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  // Trim old data (90 days)
+  const cutoff = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
   for (const k of Object.keys(checks)) {
-    if (k.split('|')[0] < cutoffStr) delete checks[k];
+    if (k.split('|')[0] < cutoff) delete checks[k];
   }
-  // Local backup
+  // Local backup (always)
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(checks)); } catch {}
 
-  // Cloud sync via GitHub API
+  // Cloud sync
   if (cloudAvailable) {
     try {
-      // Get latest SHA
-      const getRes = await fetch(API_URL, {
-        headers: { Authorization: 'Bearer ' + TOKEN, Accept: 'application/vnd.github.v3+json' }
-      });
-      let sha = null;
-      if (getRes.ok) {
-        const j = await getRes.json();
-        sha = j.sha;
-        // Merge with server data
-        const serverData = JSON.parse(decodeURIComponent(escape(atob(j.content))));
-        Object.assign(serverData, checks);
-        checks = serverData;
+      // Get latest from API (with retry for 409 conflict)
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const getRes = await fetch(API_URL, {
+          headers: { Authorization: 'Bearer ' + TOKEN, Accept: 'application/vnd.github.v3+json' }
+        });
+        let sha = null;
+        if (getRes.ok) {
+          const j = await getRes.json();
+          sha = j.sha;
+          // Merge: server data wins for keys we didn't touch, our data wins for touched key
+          const serverData = JSON.parse(b64Decode(j.content));
+          const merged = Object.assign({}, serverData, checks);
+          checks = merged;
+        }
+        // Write
+        const content = b64Encode(JSON.stringify(checks, null, 2));
+        const putBody = { message: 'Update: ' + key, content };
+        if (sha) putBody.sha = sha;
+        const putRes = await fetch(API_URL, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'Bearer ' + TOKEN,
+            Accept: 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(putBody),
+        });
+        if (putRes.ok) {
+          const r = await putRes.json();
+          cloudSha = r.content.sha;
+          syncPending = false;
+          return;
+        } else if (putRes.status === 409) {
+          // Conflict - someone else wrote, retry with new SHA
+          await new Promise(r => setTimeout(r, 300));
+          continue;
+        } else {
+          throw new Error('Write failed: ' + putRes.status);
+        }
       }
-      // Write
-      const jsonStr = JSON.stringify(checks, null, 2);
-      const content = btoa(unescape(encodeURIComponent(jsonStr)));
-      const putBody = { message: 'Update check data', content };
-      if (sha) putBody.sha = sha;
-      const putRes = await fetch(API_URL, {
-        method: 'PUT',
-        headers: {
-          Authorization: 'Bearer ' + TOKEN,
-          Accept: 'application/vnd.github.v3+json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(putBody),
-      });
-      if (putRes.ok) {
-        const r = await putRes.json();
-        cloudSha = r.content.sha;
-      }
+      // All retries failed, mark as unavailable
+      cloudAvailable = false;
     } catch (e) {
+      console.warn('Cloud sync failed:', e.message);
       cloudAvailable = false;
     }
   }
+  syncPending = false;
 }
 
 // ── Helpers ───────────────────────────────────────────
@@ -712,6 +751,26 @@ document.addEventListener('keydown', e => {
 (async function init() {
   await loadData();
   render();
+  // Auto-refresh from cloud every 30 seconds to get other devices' changes
+  setInterval(async () => {
+    if (cloudAvailable && !syncPending) {
+      try {
+        const res = await fetch(API_URL, {
+          headers: { Authorization: 'Bearer ' + TOKEN, Accept: 'application/vnd.github.v3+json' }
+        });
+        if (res.ok) {
+          const j = await res.json();
+          if (j.sha !== cloudSha) {
+            const newData = JSON.parse(b64Decode(j.content));
+            checks = newData;
+            cloudSha = j.sha;
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(checks));
+            render();
+          }
+        }
+      } catch (e) { /* ignore poll errors */ }
+    }
+  }, 30000);
 })();
 </script>
 </body>
