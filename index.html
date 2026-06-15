@@ -389,39 +389,61 @@ let currentDate = getTodayStr();
 let currentSlot = 'morning';
 let checks = {}; // key: "2026-06-14|胡鼎|抖音|morning" → true/false
 
-// ── Storage ───────────────────────────────────────────
+// ── Storage / API ──────────────────────────────────────
+const API_URL = '/api/data';
 const STORAGE_KEY = 'post-checkin-data';
+let apiAvailable = false;
 
-function loadData() {
+async function loadData() {
+  // 1. Try API first (cloud sync)
+  try {
+    const res = await fetch(API_URL);
+    if (res.ok) {
+      checks = await res.json();
+      apiAvailable = true;
+      // Sync to local backup
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(checks));
+      return;
+    }
+  } catch (e) { /* API unavailable, fall through */ }
+
+  // 2. API failed - fall back to localStorage
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     checks = raw ? JSON.parse(raw) : {};
   } catch { checks = {}; }
+  apiAvailable = false;
 }
 
-function saveData() {
-  // Clean up stale keys (older than 90 days) to keep storage small
+async function saveData(key, value) {
+  // Always save to localStorage as backup
+  if (value) {
+    checks[key] = true;
+  } else {
+    delete checks[key];
+  }
+  // Trim old data
   const now = new Date();
   const cutoff = new Date(now);
   cutoff.setDate(cutoff.getDate() - 90);
-  const cutoffStr = cutoff.toISOString().slice(0,10);
-
-  const trimmed = {};
-  for (const [k, v] of Object.entries(checks)) {
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  for (const k of Object.keys(checks)) {
     const datePart = k.split('|')[0];
-    if (datePart >= cutoffStr) {
-      trimmed[k] = v;
-    }
+    if (datePart < cutoffStr) delete checks[k];
   }
-  checks = trimmed;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(checks));
-  } catch {
-    // localStorage full — drop oldest entries
-    const keys = Object.keys(checks).sort();
-    const toRemove = keys.slice(0, Math.floor(keys.length / 3));
-    for (const k of toRemove) delete checks[k];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(checks));
+  } catch { /* ignore */ }
+
+  // Try API (cloud sync)
+  if (apiAvailable) {
+    try {
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      });
+    } catch (e) { apiAvailable = false; }
   }
 }
 
@@ -439,15 +461,6 @@ function makeKey(date, person, platform, slot) {
 
 function isChecked(date, person, platform, slot) {
   return checks[makeKey(date, person, platform, slot)] === true;
-}
-
-function setCheck(date, person, platform, slot, value) {
-  const key = makeKey(date, person, platform, slot);
-  if (value) {
-    checks[key] = true;
-  } else {
-    delete checks[key];
-  }
 }
 
 // ── Render ────────────────────────────────────────────
@@ -560,14 +573,10 @@ function countPersonDayDone(date, personName) {
 }
 
 // ── Actions ───────────────────────────────────────────
-function toggleCheck(person, platform) {
+async function toggleCheck(person, platform) {
   const key = makeKey(currentDate, person, platform, currentSlot);
-  if (checks[key]) {
-    delete checks[key];
-  } else {
-    checks[key] = true;
-  }
-  saveData();
+  const newValue = !checks[key];
+  await saveData(key, newValue);
   render();
 }
 
@@ -595,40 +604,45 @@ function goToday() {
   render();
 }
 
-function checkAllSlot() {
-  PEOPLE.forEach(p => PLATFORMS.forEach(pl => {
-    setCheck(currentDate, p.name, pl, currentSlot, true);
-  }));
-  saveData();
+async function checkAllSlot() {
+  for (const p of PEOPLE) {
+    for (const pl of PLATFORMS) {
+      const key = makeKey(currentDate, p.name, pl, currentSlot);
+      await saveData(key, true);
+    }
+  }
   render();
   showToast('已全部打勾 ✓');
 }
 
-function uncheckAllSlot() {
-  PEOPLE.forEach(p => PLATFORMS.forEach(pl => {
-    setCheck(currentDate, p.name, pl, currentSlot, false);
-  }));
-  saveData();
+async function uncheckAllSlot() {
+  for (const p of PEOPLE) {
+    for (const pl of PLATFORMS) {
+      const key = makeKey(currentDate, p.name, pl, currentSlot);
+      await saveData(key, false);
+    }
+  }
   render();
   showToast('已全部取消');
 }
 
-function copyYesterday() {
+async function copyYesterday() {
   const d = new Date(currentDate + 'T00:00:00');
   d.setDate(d.getDate() - 1);
   const yesterday = d.toISOString().slice(0, 10);
 
   let copied = 0;
-  PEOPLE.forEach(p => PLATFORMS.forEach(pl => {
-    SLOTS.forEach(s => {
-      const srcKey = makeKey(yesterday, p.name, pl, s);
-      if (checks[srcKey]) {
-        checks[makeKey(currentDate, p.name, pl, s)] = true;
-        copied++;
+  for (const p of PEOPLE) {
+    for (const pl of PLATFORMS) {
+      for (const s of SLOTS) {
+        const srcKey = makeKey(yesterday, p.name, pl, s);
+        if (checks[srcKey]) {
+          await saveData(makeKey(currentDate, p.name, pl, s), true);
+          copied++;
+        }
       }
-    });
-  }));
-  saveData();
+    }
+  }
   render();
   showToast(copied > 0 ? `已复制昨日 ${copied} 条记录` : '昨日无记录可复制');
 }
@@ -666,8 +680,10 @@ document.addEventListener('keydown', e => {
 });
 
 // ── Init ──────────────────────────────────────────────
-loadData();
-render();
+(async function init() {
+  await loadData();
+  render();
+})();
 </script>
 </body>
 </html>
