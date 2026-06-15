@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>每日发布打卡</title>
+<style>
+  :root {
+    --bg: #f0f2f5;
+    --card-bg: #ffffff;
+    --primary: #4f46e5;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --text: #1f2937;
+    --text-secondary: #6b7280;
+    --border: #e5e7eb;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+    --radius: 12px;
+    --transition: 0.2s ease;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 16px;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  .container { max-width: 1100px; margin: 0 auto; }
+
+  /* Header */
+  .header {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .header h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--primary), #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .date-nav { display: flex; align-items: center; gap: 6px; }
+  .date-nav button {
+    width: 36px; height: 36px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    cursor: pointer;
+    font-size: 1.1rem;
+    display: flex; align-items: center; justify-content: center;
+    transition: var(--transition);
+  }
+  .date-nav button:hover { background: #f3f4f6; border-color: var(--primary); }
+  .date-nav button:active { transform: scale(0.94); }
+  .date-input {
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    text-align: center;
+    color: var(--text);
+    background: var(--card-bg);
+    cursor: pointer;
+    transition: var(--transition);
+    width: 140px;
+  }
+  .date-input:focus { outline: none; border-color: var(--primary); }
+  .today-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--primary);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--primary);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: var(--transition);
+  }
+  .today-btn:hover { background: var(--primary); color: #fff; }
+
+  .stats {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    font-size: 0.85rem; color: var(--text-secondary);
+  }
+  .stat { background: #f9fafb; padding: 4px 10px; border-radius: 6px; white-space: nowrap; }
+  .stat strong { color: var(--primary); }
+
+  /* Time slot tabs */
+  .time-tabs {
+    display: flex; gap: 6px; margin-bottom: 16px;
+  }
+  .time-tab {
+    flex: 1;
+    padding: 12px 16px;
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card-bg);
+    cursor: pointer;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.95rem;
+    transition: var(--transition);
+    box-shadow: var(--shadow);
+    position: relative;
+  }
+  .time-tab:hover { border-color: #a5b4fc; }
+  .time-tab.active {
+    border-color: var(--primary);
+    background: #eef2ff;
+    color: var(--primary);
+  }
+  .time-tab .time-label { font-size: 0.8rem; color: var(--text-secondary); display: block; margin-top: 2px; }
+  .time-tab.active .time-label { color: var(--primary); }
+  .time-tab .check-badge {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-left: 6px;
+    vertical-align: middle;
+    position: relative; top: -1px;
+  }
+  .time-tab .check-badge.done { background: var(--success); }
+  .time-tab .check-badge.partial { background: var(--warning); }
+  .time-tab .check-badge.none { background: #d1d5db; }
+
+  /* Main grid */
+  .card {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .grid-header {
+    display: grid;
+    grid-template-columns: 100px repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+  .grid-header > div {
+    padding: 12px 8px;
+    background: #f9fafb;
+    text-align: center;
+    display: flex; align-items: center; justify-content: center;
+    gap: 6px;
+  }
+  .grid-header .corner { font-size: 0.8rem; }
+
+  .grid-body { display: flex; flex-direction: column; gap: 1px; background: var(--border); }
+
+  .grid-row {
+    display: grid;
+    grid-template-columns: 100px repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    transition: var(--transition);
+  }
+  .grid-row:hover { filter: brightness(0.98); }
+
+  .grid-row .name-cell {
+    padding: 10px 12px;
+    background: var(--card-bg);
+    display: flex; align-items: center;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text);
+    letter-spacing: 0.5px;
+  }
+  .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #fff;
+    margin-right: 10px;
+    flex-shrink: 0;
+  }
+
+  .check-cell {
+    padding: 6px;
+    background: var(--card-bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .check-box {
+    width: 38px; height: 38px;
+    border: 2.5px solid #d1d5db;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s ease;
+    background: #fff;
+    flex-shrink: 0;
+  }
+  .check-box:hover { border-color: var(--primary); transform: scale(1.08); box-shadow: 0 0 0 4px rgba(79,70,229,.1); }
+  .check-box:active { transform: scale(0.9); }
+  .check-box.checked {
+    background: var(--success);
+    border-color: var(--success);
+  }
+  .check-box.checked::after {
+    content: '✓';
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  /* Batch actions */
+  .batch-bar {
+    display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center;
+  }
+  .batch-btn {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card-bg);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    transition: var(--transition);
+    display: flex; align-items: center; gap: 5px;
+  }
+  .batch-btn:hover { border-color: var(--primary); color: var(--primary); background: #eef2ff; }
+  .batch-btn.danger:hover { border-color: var(--danger); color: var(--danger); background: #fef2f2; }
+  .batch-btn.success:hover { border-color: var(--success); color: var(--success); background: #ecfdf5; }
+
+  .legend {
+    display: flex; gap: 16px; margin-top: 12px; flex-wrap: wrap;
+    font-size: 0.8rem; color: var(--text-secondary);
+  }
+  .legend span { display: flex; align-items: center; gap: 4px; }
+  .legend .dot {
+    width: 10px; height: 10px; border-radius: 3px; display: inline-block;
+  }
+  .legend .dot.green { background: var(--success); }
+  .legend .dot.gray { border: 2px solid #d1d5db; background: #fff; border-radius: 3px; }
+
+  /* Mobile responsive */
+  @media (max-width: 640px) {
+    body { padding: 8px; }
+    .header { padding: 14px 16px; }
+    .header h1 { font-size: 1.2rem; }
+    .grid-header { grid-template-columns: 70px repeat(4, 1fr); font-size: 0.7rem; }
+    .grid-row { grid-template-columns: 70px repeat(4, 1fr); }
+    .grid-row .name-cell { padding: 8px 6px; font-size: 0.8rem; }
+    .avatar { width: 26px; height: 26px; font-size: 0.7rem; margin-right: 4px; }
+    .check-box { width: 30px; height: 30px; border-radius: 8px; }
+    .check-box.checked::after { font-size: 0.9rem; }
+    .time-tab { padding: 10px 8px; font-size: 0.8rem; }
+    .date-input { width: 120px; font-size: 0.85rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>📋 每日发布打卡</h1>
+    <div class="header-right">
+      <div class="date-nav">
+        <button onclick="changeDate(-1)" title="前一天">◀</button>
+        <input type="date" class="date-input" id="datePicker" onchange="onDateChange()">
+        <button onclick="changeDate(1)" title="后一天">▶</button>
+      </div>
+      <button class="today-btn" onclick="goToday()">今天</button>
+      <div class="stats" id="stats"></div>
+    </div>
+  </div>
+
+  <!-- Time slot selector -->
+  <div class="time-tabs" id="timeTabs">
+    <div class="time-tab active" data-slot="morning" onclick="switchSlot('morning')">
+      ☀️ 上午<span class="time-label">11:30</span>
+    </div>
+    <div class="time-tab" data-slot="afternoon" onclick="switchSlot('afternoon')">
+      🌤️ 下午<span class="time-label">17:30</span>
+    </div>
+    <div class="time-tab" data-slot="evening" onclick="switchSlot('evening')">
+      🌙 晚上<span class="time-label">20:30</span>
+    </div>
+  </div>
+
+  <!-- Main grid -->
+  <div class="card">
+    <div class="grid-header">
+      <div class="corner">成员</div>
+      <div>🎵 抖音</div>
+      <div>📕 小红书</div>
+      <div>🎬 视频号</div>
+      <div>💬 朋友圈</div>
+    </div>
+    <div class="grid-body" id="gridBody"></div>
+  </div>
+
+  <!-- Batch actions -->
+  <div class="batch-bar">
+    <button class="batch-btn success" onclick="checkAllSlot()">✅ 全部打勾</button>
+    <button class="batch-btn danger" onclick="uncheckAllSlot()">↩️ 全部取消</button>
+    <button class="batch-btn" onclick="copyYesterday()">📋 复制昨日记录</button>
+  </div>
+
+  <div class="legend">
+    <span><span class="dot green"></span> 已发布</span>
+    <span><span class="dot gray"></span> 未打卡</span>
+  </div>
+</div>
+
+<script>
+// ── Data ──────────────────────────────────────────────
+const PEOPLE = [
+  { name: '胡鼎',   avatar: '#ef4444', initial: '胡' },
+  { name: '林建豪', avatar: '#f59e0b', initial: '林' },
+  { name: '白嘉硕', avatar: '#8b5cf6', initial: '白' },
+  { name: '陈红宇', avatar: '#10b981', initial: '陈' },
+  { name: '李帅先', avatar: '#3b82f6', initial: '李' },
+];
+
+const PLATFORMS = ['抖音', '小红书', '视频号', '朋友圈'];
+const SLOTS = ['morning', 'afternoon', 'evening'];
+const SLOT_LABELS = { morning: '上午 11:30', afternoon: '下午 17:30', evening: '晚上 20:30' };
+
+// ── State ─────────────────────────────────────────────
+let currentDate = getTodayStr();
+let currentSlot = 'morning';
+let checks = {}; // key: "2026-06-14|胡鼎|抖音|morning" → true/false
+
+// ── Storage ───────────────────────────────────────────
+const STORAGE_KEY = 'post-checkin-data';
+
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    checks = raw ? JSON.parse(raw) : {};
+  } catch { checks = {}; }
+}
+
+function saveData() {
+  // Clean up stale keys (older than 90 days) to keep storage small
+  const now = new Date();
+  const cutoff = new Date(now);
+  cutoff.setDate(cutoff.getDate() - 90);
+  const cutoffStr = cutoff.toISOString().slice(0,10);
+
+  const trimmed = {};
+  for (const [k, v] of Object.entries(checks)) {
+    const datePart = k.split('|')[0];
+    if (datePart >= cutoffStr) {
+      trimmed[k] = v;
+    }
+  }
+  checks = trimmed;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(checks));
+  } catch {
+    // localStorage full — drop oldest entries
+    const keys = Object.keys(checks).sort();
+    const toRemove = keys.slice(0, Math.floor(keys.length / 3));
+    for (const k of toRemove) delete checks[k];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(checks));
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────
+function getTodayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
+function makeKey(date, person, platform, slot) {
+  return `${date}|${person}|${platform}|${slot}`;
+}
+
+function isChecked(date, person, platform, slot) {
+  return checks[makeKey(date, person, platform, slot)] === true;
+}
+
+function setCheck(date, person, platform, slot, value) {
+  const key = makeKey(date, person, platform, slot);
+  if (value) {
+    checks[key] = true;
+  } else {
+    delete checks[key];
+  }
+}
+
+// ── Render ────────────────────────────────────────────
+function render() {
+  // Date picker
+  document.getElementById('datePicker').value = currentDate;
+
+  // Grid
+  const gridBody = document.getElementById('gridBody');
+  gridBody.innerHTML = '';
+
+  PEOPLE.forEach(person => {
+    const row = document.createElement('div');
+    row.className = 'grid-row';
+
+    // Name cell
+    const nameCell = document.createElement('div');
+    nameCell.className = 'name-cell';
+    nameCell.innerHTML = `<span class="avatar" style="background:${person.avatar}">${person.initial}</span>${person.name}`;
+    row.appendChild(nameCell);
+
+    // Check cells
+    PLATFORMS.forEach(platform => {
+      const cell = document.createElement('div');
+      cell.className = 'check-cell';
+
+      const box = document.createElement('div');
+      box.className = 'check-box';
+      if (isChecked(currentDate, person.name, platform, currentSlot)) {
+        box.classList.add('checked');
+      }
+      box.title = `${person.name} - ${platform} - ${SLOT_LABELS[currentSlot]}`;
+      box.addEventListener('click', () => toggleCheck(person.name, platform));
+
+      cell.appendChild(box);
+      row.appendChild(cell);
+    });
+
+    gridBody.appendChild(row);
+  });
+
+  // Update tab badges & stats
+  updateTimeTabBadges();
+  updateStats();
+}
+
+function updateTimeTabBadges() {
+  document.querySelectorAll('.time-tab').forEach(tab => {
+    let badge = tab.querySelector('.check-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'check-badge';
+      tab.appendChild(badge);
+    }
+    const total = PEOPLE.length * PLATFORMS.length;
+    const done = countSlotDone(currentDate, tab.dataset.slot);
+    badge.className = 'check-badge ' + (done === total ? 'done' : done > 0 ? 'partial' : 'none');
+  });
+}
+
+function updateStats() {
+  const slotTotal = PEOPLE.length * PLATFORMS.length;
+  const slotDone = countSlotDone(currentDate, currentSlot);
+  const dayTotal = slotTotal * SLOTS.length;
+  const dayDone = countDayDone(currentDate);
+
+  document.getElementById('stats').innerHTML =
+    `<span class="stat">当前时段: <strong>${slotDone}/${slotTotal}</strong></span>` +
+    `<span class="stat">今日总计: <strong>${dayDone}/${dayTotal}</strong></span>` +
+    `<span class="stat">完成率: <strong>${dayTotal ? Math.round(dayDone/dayTotal*100) : 0}%</strong></span>`;
+}
+
+function countSlotDone(date, slot) {
+  let count = 0;
+  PEOPLE.forEach(p => PLATFORMS.forEach(pl => {
+    if (isChecked(date, p.name, pl, slot)) count++;
+  }));
+  return count;
+}
+
+function countDayDone(date) {
+  let count = 0;
+  PEOPLE.forEach(p => PLATFORMS.forEach(pl => {
+    SLOTS.forEach(s => {
+      if (isChecked(date, p.name, pl, s)) count++;
+    });
+  }));
+  return count;
+}
+
+// ── Actions ───────────────────────────────────────────
+function toggleCheck(person, platform) {
+  const key = makeKey(currentDate, person, platform, currentSlot);
+  if (checks[key]) {
+    delete checks[key];
+  } else {
+    checks[key] = true;
+  }
+  saveData();
+  render();
+}
+
+function switchSlot(slot) {
+  currentSlot = slot;
+  // Update active tab
+  document.querySelectorAll('.time-tab').forEach(t => t.classList.toggle('active', t.dataset.slot === slot));
+  render();
+}
+
+function changeDate(delta) {
+  const d = new Date(currentDate + 'T00:00:00');
+  d.setDate(d.getDate() + delta);
+  currentDate = d.toISOString().slice(0, 10);
+  render();
+}
+
+function onDateChange() {
+  currentDate = document.getElementById('datePicker').value;
+  render();
+}
+
+function goToday() {
+  currentDate = getTodayStr();
+  render();
+}
+
+function checkAllSlot() {
+  PEOPLE.forEach(p => PLATFORMS.forEach(pl => {
+    setCheck(currentDate, p.name, pl, currentSlot, true);
+  }));
+  saveData();
+  render();
+  showToast('已全部打勾 ✓');
+}
+
+function uncheckAllSlot() {
+  PEOPLE.forEach(p => PLATFORMS.forEach(pl => {
+    setCheck(currentDate, p.name, pl, currentSlot, false);
+  }));
+  saveData();
+  render();
+  showToast('已全部取消');
+}
+
+function copyYesterday() {
+  const d = new Date(currentDate + 'T00:00:00');
+  d.setDate(d.getDate() - 1);
+  const yesterday = d.toISOString().slice(0, 10);
+
+  let copied = 0;
+  PEOPLE.forEach(p => PLATFORMS.forEach(pl => {
+    SLOTS.forEach(s => {
+      const srcKey = makeKey(yesterday, p.name, pl, s);
+      if (checks[srcKey]) {
+        checks[makeKey(currentDate, p.name, pl, s)] = true;
+        copied++;
+      }
+    });
+  }));
+  saveData();
+  render();
+  showToast(copied > 0 ? `已复制昨日 ${copied} 条记录` : '昨日无记录可复制');
+}
+
+function showToast(msg) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    toast.style.cssText = `
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: #1f2937; color: #fff; padding: 10px 24px;
+      border-radius: 20px; font-size: 0.9rem; font-weight: 600;
+      z-index: 999; pointer-events: none; opacity: 0; transition: opacity 0.3s;
+    `;
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  clearTimeout(toast._timeout);
+  toast._timeout = setTimeout(() => { toast.style.opacity = '0'; }, 1800);
+}
+
+// ── Keyboard shortcuts ────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  switch (e.key) {
+    case 'ArrowLeft': changeDate(-1); break;
+    case 'ArrowRight': changeDate(1); break;
+    case '1': switchSlot('morning'); break;
+    case '2': switchSlot('afternoon'); break;
+    case '3': switchSlot('evening'); break;
+    case 't': case 'T': goToday(); break;
+  }
+});
+
+// ── Init ──────────────────────────────────────────────
+loadData();
+render();
+</script>
+</body>
+</html>
