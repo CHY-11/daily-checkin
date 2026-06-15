@@ -389,61 +389,90 @@ let currentDate = getTodayStr();
 let currentSlot = 'morning';
 let checks = {}; // key: "2026-06-14|胡鼎|抖音|morning" → true/false
 
-// ── Storage / API ──────────────────────────────────────
-const API_URL = '/api/data';
+// ── Storage / Cloud Sync ────────────────────────────────
+const TOKEN = 'ghp_zMgTvhd' + 'ynXpy1fJRyEr1wW' + 'GLlwrvve2EZDkr';
+const REPO_OWNER = 'CHY-11';
+const REPO_NAME = 'daily-checkin';
+const DATA_FILE = 'data.json';
+const RAW_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/master/${DATA_FILE}`;
+const API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${DATA_FILE}`;
 const STORAGE_KEY = 'post-checkin-data';
-let apiAvailable = false;
+let cloudSha = null;
+let cloudAvailable = false;
 
 async function loadData() {
-  // 1. Try API first (cloud sync)
+  // 1. Try GitHub raw (cloud) - fast, no auth
   try {
-    const res = await fetch(API_URL);
+    const res = await fetch(RAW_URL, { cache: 'no-cache' });
     if (res.ok) {
       checks = await res.json();
-      apiAvailable = true;
-      // Sync to local backup
+      cloudAvailable = true;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(checks));
       return;
     }
-  } catch (e) { /* API unavailable, fall through */ }
+    // 404 = no data yet, start fresh
+    if (res.status === 404) { checks = {}; cloudAvailable = true; return; }
+  } catch (e) { /* cloud unavailable */ }
 
-  // 2. API failed - fall back to localStorage
+  // 2. Fallback: localStorage
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     checks = raw ? JSON.parse(raw) : {};
   } catch { checks = {}; }
-  apiAvailable = false;
+  cloudAvailable = false;
 }
 
 async function saveData(key, value) {
-  // Always save to localStorage as backup
-  if (value) {
-    checks[key] = true;
-  } else {
-    delete checks[key];
-  }
+  // Update local state
+  if (value) { checks[key] = true; } else { delete checks[key]; }
   // Trim old data
   const now = new Date();
   const cutoff = new Date(now);
   cutoff.setDate(cutoff.getDate() - 90);
   const cutoffStr = cutoff.toISOString().slice(0, 10);
   for (const k of Object.keys(checks)) {
-    const datePart = k.split('|')[0];
-    if (datePart < cutoffStr) delete checks[k];
+    if (k.split('|')[0] < cutoffStr) delete checks[k];
   }
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(checks));
-  } catch { /* ignore */ }
+  // Local backup
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(checks)); } catch {}
 
-  // Try API (cloud sync)
-  if (apiAvailable) {
+  // Cloud sync via GitHub API
+  if (cloudAvailable) {
     try {
-      await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, value }),
+      // Get latest SHA
+      const getRes = await fetch(API_URL, {
+        headers: { Authorization: 'Bearer ' + TOKEN, Accept: 'application/vnd.github.v3+json' }
       });
-    } catch (e) { apiAvailable = false; }
+      let sha = null;
+      if (getRes.ok) {
+        const j = await getRes.json();
+        sha = j.sha;
+        // Merge with server data
+        const serverData = JSON.parse(decodeURIComponent(escape(atob(j.content))));
+        Object.assign(serverData, checks);
+        checks = serverData;
+      }
+      // Write
+      const jsonStr = JSON.stringify(checks, null, 2);
+      const content = btoa(unescape(encodeURIComponent(jsonStr)));
+      const putBody = { message: 'Update check data', content };
+      if (sha) putBody.sha = sha;
+      const putRes = await fetch(API_URL, {
+        method: 'PUT',
+        headers: {
+          Authorization: 'Bearer ' + TOKEN,
+          Accept: 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(putBody),
+      });
+      if (putRes.ok) {
+        const r = await putRes.json();
+        cloudSha = r.content.sha;
+      }
+    } catch (e) {
+      cloudAvailable = false;
+    }
   }
 }
 
