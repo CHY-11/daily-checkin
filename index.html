@@ -102,6 +102,41 @@
   }
   .stat { background: #f9fafb; padding: 4px 10px; border-radius: 6px; white-space: nowrap; }
   .stat strong { color: var(--primary); }
+  .stat.rate {
+    font-weight: 700;
+    font-size: 1rem;
+    background: #eef2ff;
+    color: var(--primary);
+    padding: 6px 14px;
+    border-radius: 20px;
+  }
+  .stat.rate.full { background: #d1fae5; color: #059669; }
+
+  /* Progress bar */
+  .progress-wrap { width: 100%; margin-top: 10px; }
+  .progress-label { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 4px; }
+  .progress-bar {
+    height: 8px;
+    background: #e5e7eb;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), #8b5cf6);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+  }
+  .progress-fill.full { background: linear-gradient(90deg, #10b981, #34d399); }
+
+  /* Per-person stats in name cell */
+  .person-stat {
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+    margin-left: auto;
+    white-space: nowrap;
+  }
 
   /* Time slot tabs */
   .time-tabs {
@@ -316,6 +351,12 @@
     <div class="grid-body" id="gridBody"></div>
   </div>
 
+  <!-- Progress bar -->
+  <div class="progress-wrap">
+    <div class="progress-label" id="progressLabel">今日完成: 0/60</div>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+  </div>
+
   <!-- Batch actions -->
   <div class="batch-bar">
     <button class="batch-btn success" onclick="checkAllSlot()">✅ 全部打勾</button>
@@ -425,7 +466,9 @@ function render() {
     // Name cell
     const nameCell = document.createElement('div');
     nameCell.className = 'name-cell';
-    nameCell.innerHTML = `<span class="avatar" style="background:${person.avatar}">${person.initial}</span>${person.name}`;
+    const personDayDone = countPersonDayDone(currentDate, person.name);
+    const personDayTotal = PLATFORMS.length * SLOTS.length;
+    nameCell.innerHTML = `<span class="avatar" style="background:${person.avatar}">${person.initial}</span>${person.name}<span class="person-stat">${personDayDone}/${personDayTotal}</span>`;
     row.appendChild(nameCell);
 
     // Check cells
@@ -472,11 +515,20 @@ function updateStats() {
   const slotDone = countSlotDone(currentDate, currentSlot);
   const dayTotal = slotTotal * SLOTS.length;
   const dayDone = countDayDone(currentDate);
+  const pct = dayTotal ? Math.round(dayDone / dayTotal * 100) : 0;
+  const isFull = dayDone === dayTotal;
 
   document.getElementById('stats').innerHTML =
     `<span class="stat">当前时段: <strong>${slotDone}/${slotTotal}</strong></span>` +
     `<span class="stat">今日总计: <strong>${dayDone}/${dayTotal}</strong></span>` +
-    `<span class="stat">完成率: <strong>${dayTotal ? Math.round(dayDone/dayTotal*100) : 0}%</strong></span>`;
+    `<span class="stat rate${isFull ? ' full' : ''}">📊 ${pct}%</span>`;
+
+  // Progress bar
+  document.getElementById('progressLabel').textContent =
+    isFull ? `🎉 今日全部完成! ${dayDone}/${dayTotal}` : `今日完成: ${dayDone}/${dayTotal}`;
+  const fill = document.getElementById('progressFill');
+  fill.style.width = pct + '%';
+  fill.className = 'progress-fill' + (isFull ? ' full' : '');
 }
 
 function countSlotDone(date, slot) {
@@ -494,6 +546,16 @@ function countDayDone(date) {
       if (isChecked(date, p.name, pl, s)) count++;
     });
   }));
+  return count;
+}
+
+function countPersonDayDone(date, personName) {
+  let count = 0;
+  PLATFORMS.forEach(pl => {
+    SLOTS.forEach(s => {
+      if (isChecked(date, personName, pl, s)) count++;
+    });
+  });
   return count;
 }
 
